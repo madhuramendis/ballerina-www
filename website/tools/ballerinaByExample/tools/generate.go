@@ -20,8 +20,9 @@ import (
 var cacheDir = filepath.FromSlash("/tmp/gobyexample-cache")
 var pygmentizeBin = filepath.FromSlash("tools/ballerinaByExample/vendor/pygments/pygmentize")
 var githubBallerinaByExampleBaseURL = "https://github.com/ballerina-lang/ballerina/tree/master"
-var examplesDir = os.Args[1];
-var siteDir = os.Args[2];
+var examplesDir = os.Args[1]
+var version = os.Args[2]
+var siteDir = os.Args[3]
 var dirPathWordSeparator = "-"
 var filePathWordSeparator = "_"
 var consoleOutputExtn = ".out"
@@ -163,6 +164,7 @@ type Example struct {
     PrevExample                 *Example
     FullCode			string
     GithubLink          string
+    Version             string
 }
 
 type BBEMeta struct {
@@ -325,7 +327,7 @@ func  parseExamples(categories []BBECategory) []*Example {
             exampleId := strings.ToLower(bbeMeta.Url)
             if  len(exampleId) == 0 {
                 fmt.Fprintln(os.Stderr,"\t[WARN] Skipping bbe : " + exampleName + ". Folder path is not defined")
-                continue;
+                continue
             }
             exampleId = strings.Replace(exampleId, " ", dirPathWordSeparator, -1)
             exampleId = strings.Replace(exampleId, "/", dirPathWordSeparator, -1)
@@ -335,6 +337,7 @@ func  parseExamples(categories []BBECategory) []*Example {
             fmt.Println("\tprocessing bbe: " + exampleName )
             example := Example{Name: exampleName}
             example.Id = exampleId
+            example.Version = version
             example.Segs = make([][]*Seg, 0)
             sourcePaths := mustGlob(examplesDir + "/" + "examples/" + exampleId + "/*")
 
@@ -344,26 +347,26 @@ func  parseExamples(categories []BBECategory) []*Example {
 
             if  !isFileExist(fileDirPath) {
                 fmt.Fprintln(os.Stderr,"\t[WARN] Skipping bbe : " + exampleName + ". "+ fileDirPath +" is not found")
-                continue;
+                continue
             }
 
             descFilePath := fileDirPath + exampleBaseFilePattern + descriptionFileExtn
             if  !isFileExist(descFilePath) {
-                fmt.Fprintln(os.Stderr,"\t[WARN] Skipping bbe : " + exampleName + ". "+ descFilePath +" is not found");
-                continue;
+                fmt.Fprintln(os.Stderr,"\t[WARN] Skipping bbe : " + exampleName + ". "+ descFilePath +" is not found")
+                continue
             }
 
             balFiles := getAllBalFiles(fileDirPath);
             if len(balFiles) == 0 {
                 fmt.Fprintln(os.Stderr, "\t[WARN] Skipping bbe : " + exampleName + ". No *.bal files are found")
-                continue;
+                continue
             }
 
-            rearrangedPaths = appendFilePath(rearrangedPaths, descFilePath);
+            rearrangedPaths = appendFilePath(rearrangedPaths, descFilePath)
             for _, balFilePath := range balFiles {
                 var extension = filepath.Ext(balFilePath)
                 var currentSample = balFilePath[0:len(balFilePath)-len(extension)]
-                rearrangedPaths = appendFilePath(rearrangedPaths, balFilePath);
+                rearrangedPaths = appendFilePath(rearrangedPaths, balFilePath)
 
                 consoleOutputFilePath :=  currentSample + consoleOutputExtn
                 serverOutputFilePath := currentSample + serverOutputPrefix + consoleOutputExtn
@@ -387,11 +390,11 @@ func  parseExamples(categories []BBECategory) []*Example {
                     }
                 }
             }
-            sourcePaths = rearrangedPaths;
+            sourcePaths = rearrangedPaths
             updatedExamplesList, pErr := prepareExample(sourcePaths, example, examples)
             if pErr != nil {
                 fmt.Fprintln(os.Stderr, "\t[WARN] Unexpected error occured while parsing. Skipping bbe : "+example.Name, pErr)
-                continue;
+                continue
             }
             examples = updatedExamplesList
         }
@@ -483,7 +486,16 @@ func renderIndex(examples []*Example) {
     indexTmpl := template.New("index")
     _, err := indexTmpl.Parse(mustReadFile("tools/ballerinaByExample/templates/index.tmpl"))
     check(err)
-    indexF, err := os.Create(siteDir + "/index.html")
+    indexF, err := os.Create(siteDir + "/withoutfrontmatter/index.html")
+    check(err)
+    indexTmpl.Execute(indexF, examples)
+}
+
+func renderIndexTemp(examples []*Example) {
+    indexTmpl := template.New("indexTemp")
+    _, err := indexTmpl.Parse(mustReadFile("tools/ballerinaByExample/templates/index-temp.tmpl"))
+    check(err)
+    indexF, err := os.Create(siteDir + "/withfrontmatter/index.html")
     check(err)
     indexTmpl.Execute(indexF, examples)
 }
@@ -496,7 +508,7 @@ func renderExamples(examples []*Example) {
     var exampleItem bytes.Buffer
     var renderedBBEs = []string{}
     for _, example := range examples {
-        exampleF, err := os.Create(siteDir + "/" + example.Id+".html")
+        exampleF, err := os.Create(siteDir + "/withoutfrontmatter/" + example.Id+".html")
         exampleItem.WriteString(example.Id)
         check(err)
         exampleTmpl.Execute(exampleF, example)
@@ -504,6 +516,24 @@ func renderExamples(examples []*Example) {
     }
     generateJSON(renderedBBEs)
 }
+
+func renderExamplesTemp(examples []*Example) {
+    exampleTmpl := template.New("example")
+    _, err := exampleTmpl.Parse(mustReadFile("tools/ballerinaByExample/templates/example-temp.tmpl"))
+    check(err)
+
+    var exampleItem bytes.Buffer
+    var renderedBBEs = []string{}
+    for _, example := range examples {
+        exampleF, err := os.Create(siteDir + "/withfrontmatter/" + example.Id+".html")
+        exampleItem.WriteString(example.Id)
+        check(err)
+        exampleTmpl.Execute(exampleF, example)
+        renderedBBEs = append(renderedBBEs , example.Id)
+    }
+    generateJSON(renderedBBEs)
+}
+
 
 func generateJSON(renderedBBEs []string) {
     urlsJson, _ := json.Marshal(renderedBBEs)
@@ -546,6 +576,16 @@ func main() {
     copyFile("tools/ballerinaByExample/tools/all-bbes.json", siteDir+"/all-bbes.json")
     bbeCategories := getBBECategories()
     examples := parseExamples(bbeCategories)
+
+    // Render index without front matter.
     renderIndex(examples)
+
+    // Render index for examples with front matter for Jekyll
+    renderIndexTemp(examples)
+
+    // Render examples without front matter.
     renderExamples(examples)
+
+    // Render examples with front matter for Jekyll
+    renderExamplesTemp(examples)
 }
